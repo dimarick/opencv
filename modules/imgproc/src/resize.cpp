@@ -4163,7 +4163,7 @@ void cv::resize( InputArray _src, OutputArray _dst, Size dsize,
         CV_Assert(inv_scale_x > 0); CV_Assert(inv_scale_y > 0);
     }
 
-    if (interpolation == INTER_LINEAR_EXACT && (_src.depth() == CV_32F || _src.depth() == CV_64F))
+    if (interpolation == INTER_LINEAR_EXACT)
         interpolation = INTER_LINEAR; // If depth isn't supported fallback to generic resize
 
     CV_OCL_RUN(_src.dims() <= 2 && _dst.isUMat() && _src.cols() > 10 && _src.rows() > 10,

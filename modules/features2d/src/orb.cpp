@@ -883,17 +883,31 @@ static void computeKeyPoints(const Mat& imagePyramid,
     for( level = 0; level < nlevels; level++ )
     {
         int featuresNum = nfeaturesPerLevel[level];
-        Mat img = imagePyramid(layerInfo[level]);
+
         Mat mask = maskPyramid.empty() ? Mat() : maskPyramid(layerInfo[level]);
-
+#ifdef HAVE_OPENCL
         // Detect FAST features, 20 is a good threshold
-        {
-        Ptr<FastFeatureDetector> fd = FastFeatureDetector::create(fastThreshold, true);
-        fd->detect(img, keypoints, mask);
-        }
+        if( useOCL ) {
+            auto img = uimagePyramid(layerInfo[level]);
+            {
+            Ptr<FastFeatureDetector> fd = FastFeatureDetector::create(fastThreshold, true);
+            fd->detect(img, keypoints, mask);
+            }
+            // Remove keypoints very close to the border
+            KeyPointsFilter::runByImageBorder(keypoints, img.size(), edgeThreshold);
 
-        // Remove keypoints very close to the border
-        KeyPointsFilter::runByImageBorder(keypoints, img.size(), edgeThreshold);
+        } else
+#endif
+        {
+            auto img = imagePyramid(layerInfo[level]);
+            {
+            Ptr<FastFeatureDetector> fd = FastFeatureDetector::create(fastThreshold, true);
+            fd->detect(img, keypoints, mask);
+            }
+            // Remove keypoints very close to the border
+            KeyPointsFilter::runByImageBorder(keypoints, img.size(), edgeThreshold);
+
+        }
 
         // Keep more points than necessary as FAST does not give amazing corners
         KeyPointsFilter::retainBest(keypoints, scoreType == ORB_Impl::HARRIS_SCORE ? 2 * featuresNum : featuresNum);
@@ -1036,7 +1050,7 @@ void ORB_Impl::detectAndCompute( InputArray _image, InputArray _mask,
     bool useOCL = false;
 #endif
 
-    Mat image = _image.getMat(), mask = _mask.getMat();
+    UMat image = _image.getUMat(), mask = _mask.getUMat();
     if( image.type() != CV_8UC1 )
         cvtColor(_image, image, COLOR_BGR2GRAY);
 
@@ -1069,7 +1083,7 @@ void ORB_Impl::detectAndCompute( InputArray _image, InputArray _mask,
     std::vector<Rect> layerInfo(nLevels);
     std::vector<int> layerOfs(nLevels);
     std::vector<float> layerScale(nLevels);
-    Mat imagePyramid, maskPyramid;
+    UMat imagePyramid, maskPyramid;
     UMat uimagePyramid, ulayerInfo;
 
     float level0_inv_scale = 1.0f / getScale(0, firstLevel, scaleFactor);
@@ -1104,7 +1118,7 @@ void ORB_Impl::detectAndCompute( InputArray _image, InputArray _mask,
     if( !mask.empty() )
         maskPyramid.create(bufSize, CV_8U);
 
-    Mat prevImg = image, prevMask = mask;
+    UMat prevImg = image, prevMask = mask;
 
     // Pre-compute the scale pyramids
     for (level = 0; level < nLevels; ++level)
@@ -1113,8 +1127,8 @@ void ORB_Impl::detectAndCompute( InputArray _image, InputArray _mask,
         Size sz(linfo.width, linfo.height);
         Size wholeSize(sz.width + border*2, sz.height + border*2);
         Rect wholeLinfo = Rect(linfo.x - border, linfo.y - border, wholeSize.width, wholeSize.height);
-        Mat extImg = imagePyramid(wholeLinfo), extMask;
-        Mat currImg = extImg(Rect(border, border, sz.width, sz.height)), currMask;
+        UMat extImg = imagePyramid(wholeLinfo), extMask;
+        UMat currImg = extImg(Rect(border, border, sz.width, sz.height)), currMask;
 
         if( !mask.empty() )
         {
@@ -1159,11 +1173,12 @@ void ORB_Impl::detectAndCompute( InputArray _image, InputArray _mask,
 
     if( do_keypoints )
     {
-        if( useOCL )
+        if( useOCL ) {
             imagePyramid.copyTo(uimagePyramid);
+        }
 
         // Get keypoints, those will be far enough from the border that no check will be required for the descriptor
-        computeKeyPoints(imagePyramid, uimagePyramid, maskPyramid,
+        computeKeyPoints(imagePyramid.getMat(AccessFlag::ACCESS_READ), uimagePyramid, maskPyramid.getMat(AccessFlag::ACCESS_READ),
                          layerInfo, ulayerInfo, layerScale, keypoints,
                          nfeatures, scaleFactor, edgeThreshold, patchSize, scoreType, useOCL, fastThreshold);
     }
@@ -1224,7 +1239,7 @@ void ORB_Impl::detectAndCompute( InputArray _image, InputArray _mask,
         for( level = 0; level < nLevels; level++ )
         {
             // preprocess the resized image
-            Mat workingMat = imagePyramid(layerInfo[level]);
+            UMat workingMat = imagePyramid(layerInfo[level]);
 
             //boxFilter(working_mat, working_mat, working_mat.depth(), Size(5,5), Point(-1,-1), true, BORDER_REFLECT_101);
             GaussianBlur(workingMat, workingMat, Size(7, 7), 2, 2, BORDER_REFLECT_101);
@@ -1253,7 +1268,7 @@ void ORB_Impl::detectAndCompute( InputArray _image, InputArray _mask,
 #endif
         {
             Mat descriptors = _descriptors.getMat();
-            computeOrbDescriptors(imagePyramid, layerInfo, layerScale,
+            computeOrbDescriptors(imagePyramid.getMat(AccessFlag::ACCESS_READ), layerInfo, layerScale,
                                   keypoints, descriptors, pattern, dsize, wta_k);
         }
     }
